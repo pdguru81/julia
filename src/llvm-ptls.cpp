@@ -42,11 +42,28 @@ private:
                        Function *ptls_getter, Type *T_ppjlvalue);
 };
 
-static void ensure_global(const char *name, Type *t, Module &M)
+static void ensure_global(const char *name, Type *t, Module &M,
+                          bool dllimport=false)
 {
     if (M.getNamedValue(name))
         return;
-    new GlobalVariable(M, t, false, GlobalVariable::ExternalLinkage, NULL, name);
+    GlobalVariable *proto = new GlobalVariable(M, t, false,
+                                               GlobalVariable::ExternalLinkage,
+                                               NULL, name);
+#ifdef _OS_WINDOWS_
+    // setting JL_DLLEXPORT correctly only matters when building a binary
+    // (global_proto will strip this from the JIT)
+    if (dllimport) {
+#ifdef LLVM35
+        // add the __declspec(dllimport) attribute
+        proto->setDLLStorageClass(GlobalValue::DLLImportStorageClass);
+#else
+        proto->setLinkage(GlobalValue::DLLImportLinkage);
+#endif
+    }
+#else // _OS_WINDOWS_
+    (void)proto;
+#endif // _OS_WINDOWS_
 }
 
 void LowerPTLS::runOnFunction(LLVMContext &ctx, Module &M, Function *F,
@@ -149,7 +166,7 @@ bool LowerPTLS::runOnModule(Module &M)
     if (imaging_mode)
         ensure_global("jl_get_ptls_states.ptr", functype->getPointerTo(), M);
 #else
-    ensure_global("jl_tls_states", T_ppjlvalue, M);
+    ensure_global("jl_tls_states", T_ppjlvalue, M, imaging_mode);
 #endif
     for (auto F = M.begin(), E = M.end(); F != E; ++F) {
         if (F->isDeclaration())
